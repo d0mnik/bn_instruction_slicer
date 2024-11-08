@@ -6,7 +6,6 @@
       "helper"
    ],
    "api": [
-      "python2",
       "python3"
    ],
    "description": "Forward and backward instruction slicer",
@@ -20,6 +19,6 @@
       "Windows",
       "Linux"
    ],
-   "version": "1.0",
-   "minimumbinaryninjaversion": 1904
+   "version": "1.1",
+   "minimumbinaryninjaversion": 4911
 }
