@@ -1,50 +1,76 @@
-import binaryninja as bn
-import sys
-if (sys.version[0] == '2'):
-    import Queue 
-else:
-    import queue as Queue
-def slicer(bv, address,direction):
-    colorize = []
-    colorize.append(address)
-    function = bv.get_functions_containing(address)[0]
+from binaryninja import BinaryView, PluginCommand, Variable, log
+from binaryninja.enums import HighlightStandardColor
+from queue import Queue
 
-    ml = function.mlil
-    instr = ml[ml.get_instruction_start(address)].ssa_form
-    if direction == 'F':
-    ### Forward
-        var_s = instr.vars_written
-        q = Queue.Queue()
-        for i in var_s:
+
+def slicer(bv: BinaryView, address: int, direction: str):
+    seen: list[Variable] = []
+    colorize: list[int] = []
+    colorize.append(address)
+
+    func = bv.get_functions_containing(address)[0]
+
+    mlil_func = func.mlil
+    llil = func.get_low_level_il_at(address)
+    if llil is None or llil.mlil is None:
+        log.log_error(f"Unable to get MLIL instruction at address {address:x}.")
+        return
+    instr = llil.mlil
+    ### forward slice
+    if direction == "F":
+        q = Queue()
+        for i in instr.vars_written:
             q.put(i)
         while not q.empty():
             var = q.get()
-            temp = ml.get_ssa_var_uses(var)
-            for i in temp:
+            seen.append(var)
+            uses = mlil_func.get_var_uses(var)
+            for i in uses:
                 colorize.append(i.address)
-                data = i.ssa_form.vars_written
-                for j in data:
+                for j in i.vars_written:
+                    if j in seen:
+                        continue
                     q.put(j)
-    elif direction == 'B':
-        var_s = instr.vars_read
-        q = Queue.Queue()
-        for i in var_s:
+
+    # backward slice
+    elif direction == "B":
+        q: Queue[Variable] = Queue()
+        for i in instr.vars_read:
             q.put(i)
         while not q.empty():
             var = q.get()
-            temp = ml.get_ssa_var_definition(var)
-            if temp != None:
-                colorize.append(temp.address)
-                data = temp.ssa_form.vars_read
-                for j in data:
+            seen.append(var)
+            definitions = mlil_func.get_var_definitions(var)
+            if len(definitions) == 0:
+                continue
+            for definition in definitions:
+                colorize.append(definition.address)
+                for j in definition.vars_read:
+                    if j in seen:
+                        continue
                     q.put(j)
+
     bv.begin_undo_actions()
     for i in colorize:
-        function.set_user_instr_highlight(i,bn.HighlightStandardColor.BlueHighlightColor)
+        func.set_user_instr_highlight(i, HighlightStandardColor.BlueHighlightColor)
     bv.commit_undo_actions()
-def s_b(bv,address):
-    slicer(bv,address,'B')
-def s_f(bv,address):
-    slicer(bv,address,'F')
-bn.PluginCommand.register_for_address("Backward slicing", "Perform a backward slicing from this address", s_b)
-bn.PluginCommand.register_for_address("Forward slicing", "Perform a forward slicing from this address", s_f)
+
+
+def slice_backwards(bv: BinaryView, address: int):
+    slicer(bv, address, "B")
+
+
+def slice_forward(bv: BinaryView, address: int):
+    slicer(bv, address, "F")
+
+
+PluginCommand.register_for_address(
+    "Instruction Slicer\\Backward slicing",
+    "Perform backward slicing from this address",
+    slice_backwards,
+)
+PluginCommand.register_for_address(
+    "Instruction Slicer\\Forward slicing",
+    "Perform forward slicing from this address",
+    slice_forward,
+)
